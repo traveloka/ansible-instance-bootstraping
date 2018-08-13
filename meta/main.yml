@@ -1,0 +1,6 @@
+---
+galaxy_info:
+  author: Rafi Kurnia Putra
+  description: Ansible role to setup newly launched instance
+  company: Traveloka
+  license: Apache-2.0
