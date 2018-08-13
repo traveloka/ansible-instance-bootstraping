@@ -1,1 +1,45 @@
 #!/usr/bin/env python
+
+from urllib2 import urlopen
+from subprocess import call, check_output
+from boto3 import client
+import sys
+
+iam_metadata_url = "http://169.254.169.254/latest/meta-data/iam/info"
+
+cluster_name = "-".join(
+    eval(
+        urlopen(iam_metadata_url).read()
+    )["InstanceProfileArn"].split("/")[-1].split("_")[-1].split("-")[:-1]
+)
+
+hostname = check_output(["hostname"]).rstrip("\n")
+new_hostname = hostname.replace("ip", cluster_name)
+
+with open("/etc/hostname", "w") as hostname_file:
+    hostname_file.write(new_hostname + "\n")
+
+call(["hostname", "-F", "/etc/hostname"])
+
+with open("/etc/hosts", "r+") as hosts_file:
+    file_data = hosts_file.read()
+    hosts_file.seek(0, 0)
+    hosts_file.write("127.0.1.1 " + new_hostname + "\n" + file_data)
+
+ssm = client("ssm", "ap-southeast-1")
+key = ssm.get_parameters(
+    Names=[sys.argv[1]],
+    WithDecryption=True
+)["Parameters"][0]["Value"]
+
+ddkey = """[Main]
+dd_url: https://app.datadoghq.com
+api_key: %s
+dogstatsd_port: %s
+""" % (key, sys.argv[2])
+
+with open("/etc/dd-agent/datadog.conf", "w") as ddfile:
+    ddfile.write(ddkey)
+
+call(["/etc/init.d/datadog-agent", "restart"])
+call(["service", "awslogs", "restart"])
