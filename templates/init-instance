@@ -22,6 +22,49 @@ def get_from_metadata(path_to_data):
     return data
 
 
+def get_cluster_name(max_attempt=10):
+    iam_info = ""
+    count = 0
+    while iam_info == "" or "InstanceProfileArn" not in iam_info:
+        iam_info = get_from_metadata(path_to_data="iam/info")
+
+        count += 1
+        if count == max_attempt and (iam_info == "" or "InstanceProfileArn" not in iam_info):
+            print("ERROR: Failed when accessing metadata to retrieve IAM Info.")
+            exit(-1)
+
+        sleep(0.5)
+
+    instance_profile_arn = eval(iam_info)["InstanceProfileArn"]
+
+    if "InstanceProfile" in instance_profile_arn:
+        cluster_name = "-".join(
+            instance_profile_arn.split("/")[-1].split("_")[-1].split("-")[:-1]
+        )
+    else:
+        cluster_name = "-".join(
+            instance_profile_arn.split("/")[-1].split("-")[1:]
+        )
+    return cluster_name
+
+
+def get_private_ipv4(max_attempt=10):
+    private_ipv4 = ""
+    count = 0
+
+    while private_ipv4 == "" or "." not in private_ipv4:
+        private_ipv4 = get_from_metadata(path_to_data="local-ipv4")
+
+        count += 1
+        if count == max_attempt and (private_ipv4 == "" or "." not in private_ipv4):
+            print("ERROR: Failed when accessing metadata to retrieve private ipv4.")
+            exit(-1)
+
+        sleep(0.5)
+
+    return private_ipv4
+
+
 def set_hostname(new_hostname):
     with open("/etc/hostname", "w") as hostname_file:
         hostname_file.write(
@@ -43,10 +86,11 @@ def set_hostname(new_hostname):
             )
 
 
-def set_datadog_api_key(parameter_store_path_for_ddkey, dogstatsd_port):
+def set_datadog_api_key(parameter_store_path_for_ddkey, dogstatsd_port, max_attempt=10):
     ssm = client("ssm", "ap-southeast-1")
 
     key = ""
+    count = 0
     while key == "":
         try:
             key = ssm.get_parameters(
@@ -55,6 +99,12 @@ def set_datadog_api_key(parameter_store_path_for_ddkey, dogstatsd_port):
             )["Parameters"][0]["Value"]
         except Exception:
             key = ""
+
+            count += 1
+            if count == max_attempt and key == "":
+                print("ERROR: Failed to access parameter store to get datadog api key.")
+                exit(-1)
+
             sleep(0.5)
 
     ddfile_content = """[Main]
@@ -73,27 +123,16 @@ if __name__ == "__main__":
     if len(argv != 3):
         print("Usage: init <parameter_store_path_for_ddkey> <dogstatsd_port>")
 
-    private_ip = ""
-    while private_ip == "" or "." not in private_ip:
-        private_ip = get_from_metadata(path_to_data="local-ipv4")
-        sleep(0.5)
+    cluster_name = get_cluster_name()
+    private_ipv4 = get_private_ipv4()
 
-    iam_info = ""
-    while iam_info == "" or "InstanceProfileArn" not in iam_info:
-        iam_info = get_from_metadata(path_to_data="iam/info")
-        sleep(0.5)
-
-    instance_profile_arn = eval(iam_info)["InstanceProfileArn"]
-    cluster_name = "-".join(
-        instance_profile_arn.split("/")[-1].split("_")[-1].split("-")[:-1]
-    )
-
-    set_hostname(
-        new_hostname="{}-{}".format(
-            cluster_name,
-            private_ip.replace(".", "-")
+    if "mongo" not in cluster_name:
+        set_hostname(
+            new_hostname="{}-{}".format(
+                cluster_name,
+                private_ipv4.replace(".", "-")
+            )
         )
-    )
 
     set_datadog_api_key(
         parameter_store_path_for_ddkey=argv[1],
