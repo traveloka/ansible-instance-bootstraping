@@ -120,8 +120,9 @@ def set_datadog_api_key(parameter_store_path_for_ddkey, dogstatsd_port, max_atte
 
 
 if __name__ == "__main__":
-    if len(argv) != 3:
-        print("Usage: init <parameter_store_path_for_ddkey> <dogstatsd_port>")
+    if len(argv) < 3:
+        print("Usage: init-instance <parameter_store_path_for_ddkey> <dogstatsd_port>")
+        exit(-1)
 
     cluster_name = get_cluster_name()
     private_ipv4 = get_private_ipv4()
