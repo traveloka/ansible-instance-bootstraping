@@ -8,13 +8,14 @@ from time import sleep
 from urllib2 import URLError, urlopen
 import re
 
+METADATA_URL = "http://169.254.169.254/latest/meta-data/"
+DDCONF_PATH = "/etc/dd-agent/datadog.conf"
+
 
 def get_from_metadata(path_to_data):
-    metadata_url = "http://169.254.169.254/latest/meta-data/"
-
     try:
         data = urlopen(
-            "{}{}".format(metadata_url, path_to_data),
+            "{}{}".format(METADATA_URL, path_to_data),
             timeout=5
         ).read()
     except URLError:
@@ -87,7 +88,7 @@ def set_hostname(new_hostname):
             )
 
 
-def set_datadog_api_key(parameter_store_path_for_ddkey, dogstatsd_port, max_attempt=10):
+def set_datadog_api_key(parameter_store_path_for_ddkey, max_attempt=10):
     ssm = client("ssm", "ap-southeast-1")
 
     key = ""
@@ -108,9 +109,7 @@ def set_datadog_api_key(parameter_store_path_for_ddkey, dogstatsd_port, max_atte
 
             sleep(0.5)
 
-    ddconf_path = "/etc/dd-agent/datadog.conf"
-
-    with open(ddconf_path) as ddfile:
+    with open(DDCONF_PATH) as ddfile:
         ddfile_content = ddfile.read()
 
     search_api_key = re.compile("api_key: [0-9]*")
@@ -120,22 +119,15 @@ def set_datadog_api_key(parameter_store_path_for_ddkey, dogstatsd_port, max_atte
         ddfile_content
     )
 
-    search_dd_port = re.compile("dogstatsd_port: [0-9]*")
-    ddfile_content = re.sub(
-        search_dd_port,
-        "dogstatsd_port: {}".format(dogstatsd_port),
-        ddfile_content
-    )
-
-    with open(ddconf_path, "w") as ddfile:
+    with open(DDCONF_PATH, "w") as ddfile:
         ddfile.write(ddfile_content)
 
     call(["/etc/init.d/datadog-agent", "restart"])
 
 
 if __name__ == "__main__":
-    if len(argv) < 3:
-        print("Usage: init-instance <parameter_store_path_for_ddkey> <dogstatsd_port>")
+    if len(argv) < 2:
+        print("Usage: init-instance <parameter_store_path_for_ddkey>")
         exit(-1)
 
     cluster_name = get_cluster_name()
@@ -149,9 +141,6 @@ if __name__ == "__main__":
             )
         )
 
-    set_datadog_api_key(
-        parameter_store_path_for_ddkey=argv[1],
-        dogstatsd_port=argv[2]
-    )
+    set_datadog_api_key(parameter_store_path_for_ddkey=argv[1])
 
     call(["service", "awslogs", "restart"])
