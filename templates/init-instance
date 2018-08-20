@@ -6,6 +6,7 @@ from subprocess import call, check_output
 from sys import argv
 from time import sleep
 from urllib2 import URLError, urlopen
+import re
 
 
 def get_from_metadata(path_to_data):
@@ -107,13 +108,26 @@ def set_datadog_api_key(parameter_store_path_for_ddkey, dogstatsd_port, max_atte
 
             sleep(0.5)
 
-    ddfile_content = """[Main]
-    dd_url: https://app.datadoghq.com
-    api_key: %s
-    dogstatsd_port: %s
-    """ % (key, dogstatsd_port)
+    ddconf_path = "/etc/dd-agent/datadog.conf"
 
-    with open("/etc/dd-agent/datadog.conf", "w") as ddfile:
+    with open(ddconf_path) as ddfile:
+        ddfile_content = ddfile.read()
+
+    search_api_key = re.compile("api_key: [0-9]*")
+    ddfile_content = re.sub(
+        search_api_key,
+        "api_key: {}".format(key),
+        ddfile_content
+    )
+
+    search_dd_port = re.compile("dogstatsd_port: [0-9]*")
+    ddfile_content = re.sub(
+        search_dd_port,
+        "dogstatsd_port: {}".format(dogstatsd_port),
+        ddfile_content
+    )
+
+    with open(ddconf_path, "w") as ddfile:
         ddfile.write(ddfile_content)
 
     call(["/etc/init.d/datadog-agent", "restart"])
