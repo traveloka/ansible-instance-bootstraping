@@ -1,0 +1,146 @@
+#!/usr/bin/env python
+# rafi.putra@traveloka.com - 20180815
+
+from boto3 import client
+from subprocess import call, check_output
+from sys import argv
+from time import sleep
+from urllib2 import URLError, urlopen
+import re
+
+METADATA_URL = "http://169.254.169.254/latest/meta-data/"
+DDCONF_PATH = "/etc/dd-agent/datadog.conf"
+
+
+def get_from_metadata(path_to_data):
+    try:
+        data = urlopen(
+            "{}{}".format(METADATA_URL, path_to_data),
+            timeout=5
+        ).read()
+    except URLError:
+        data = ""
+
+    return data
+
+
+def get_cluster_name(max_attempt=10):
+    iam_info = ""
+    count = 0
+    while iam_info == "" or "InstanceProfileArn" not in iam_info:
+        iam_info = get_from_metadata(path_to_data="iam/info")
+
+        count += 1
+        if count == max_attempt and (iam_info == "" or "InstanceProfileArn" not in iam_info):
+            print("ERROR: Failed when accessing metadata to retrieve IAM Info.")
+            exit(-1)
+
+        sleep(0.5)
+
+    instance_profile_arn = eval(iam_info)["InstanceProfileArn"]
+
+    if "InstanceProfile" in instance_profile_arn:
+        cluster_name = "-".join(
+            instance_profile_arn.split("/")[-1].split("_")[-1].split("-")[:-1]
+        )
+    else:
+        cluster_name = "-".join(
+            instance_profile_arn.split("/")[-1].split("-")[1:]
+        )
+    return cluster_name
+
+
+def get_private_ipv4(max_attempt=10):
+    private_ipv4 = ""
+    count = 0
+
+    while private_ipv4 == "" or "." not in private_ipv4:
+        private_ipv4 = get_from_metadata(path_to_data="local-ipv4")
+
+        count += 1
+        if count == max_attempt and (private_ipv4 == "" or "." not in private_ipv4):
+            print("ERROR: Failed when accessing metadata to retrieve private ipv4.")
+            exit(-1)
+
+        sleep(0.5)
+
+    return private_ipv4
+
+
+def set_hostname(new_hostname):
+    with open("/etc/hostname", "w") as hostname_file:
+        hostname_file.write(
+            "{}\n".format(new_hostname)
+        )
+
+    call(["hostname", "-F", "/etc/hostname"])
+
+    hosts = []
+    with open("/etc/hosts", "r+") as hosts_file:
+        hosts = hosts_file.readlines()
+
+    if new_hostname not in hosts[0]:
+        with open("/etc/hosts", "r+") as hosts_file:
+            file_data = hosts_file.read()
+            hosts_file.seek(0, 0)
+            hosts_file.write(
+                "127.0.1.1 {}\n{}".format(new_hostname, file_data)
+            )
+
+
+def set_datadog_api_key(parameter_store_path_for_ddkey, max_attempt=10):
+    ssm = client("ssm", "ap-southeast-1")
+
+    key = ""
+    count = 0
+    while key == "":
+        try:
+            key = ssm.get_parameters(
+                Names=[parameter_store_path_for_ddkey],
+                WithDecryption=True
+            )["Parameters"][0]["Value"]
+        except Exception:
+            key = ""
+
+            count += 1
+            if count == max_attempt and key == "":
+                print("ERROR: Failed to access parameter store to get datadog api key.")
+                exit(-1)
+
+            sleep(0.5)
+
+    with open(DDCONF_PATH) as ddfile:
+        ddfile_content = ddfile.read()
+
+    search_api_key = re.compile("api_key: [0-9]*")
+    ddfile_content = re.sub(
+        search_api_key,
+        "api_key: {}".format(key),
+        ddfile_content
+    )
+
+    with open(DDCONF_PATH, "w") as ddfile:
+        ddfile.write(ddfile_content)
+
+    call(["/etc/init.d/datadog-agent", "restart"])
+
+
+if __name__ == "__main__":
+    if len(argv) < 2:
+        print("Usage: init-instance <parameter_store_path_for_ddkey>")
+        exit(-1)
+
+    cluster_name = get_cluster_name()
+    private_ipv4 = get_private_ipv4()
+
+    if "mongo" not in cluster_name:
+        set_hostname(
+            new_hostname="{}-{}".format(
+                cluster_name,
+                private_ipv4.replace(".", "-")
+            )
+        )
+
+    set_datadog_api_key(parameter_store_path_for_ddkey=argv[1])
+
+    call(["service", "awslogs", "restart"])

@@ -1,0 +1,22 @@
+---
+- block:   
+  - name: install boto3
+    pip:
+      name: boto3
+      state: latest
+  - name: ensure dir exist
+    file:
+      path: "/opt/init/"
+      state: "directory"
+      owner: "ubuntu"
+      group: "ubuntu"
+      mode: 0755
+  - name: copy init script
+    template:
+      src: "init-instance"
+      dest: "/opt/init/init-instance"
+      owner: "ubuntu"
+      group: "ubuntu"
+      mode: 0755
+  become: true
+  become_method: sudo
